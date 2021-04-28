@@ -1,0 +1,186 @@
+free ck, cic, chc: channel.
+
+free contract, m, notify, exit, terminated: bitstring.
+free trace: bitstring.
+free state: bitstring.
+
+free num_challenge: nat.
+free num_response: nat.
+
+
+
+(* Signatures *)
+type sskey.
+type spkey.
+
+free ksi, ksc, ksh: sskey [private].
+
+fun spk(sskey): spkey.
+fun sign(bitstring,sskey): bitstring.
+
+reduc forall x: bitstring, y: sskey; checksign(sign(x,y), spk(y))=x.
+
+(* Validation and Termination *)
+fun is_valid(bitstring): bool.
+fun is_exit(bitstring): bool.
+fun is_terminated(bitstring): bool.
+
+(* Queries *)
+event startChallenge.
+event traceValid.
+event sendRewardBH.
+event challengeResolved.
+event notifyChallengeBH.
+event publicChallengeReward.
+event sendNewState.
+event notifyChallengeReceived.
+event notifyStateBI.
+event BIends.
+event BHleaves.
+event BCinterruptedForBH.
+event BCinterruptedForBI.
+event BIleaves.
+
+
+query event(startChallenge) ==> event(traceValid).
+query event(sendRewardBH) ==> event(challengeResolved).
+query event(notifyChallengeBH) ==> event(publicChallengeReward).
+query event(sendNewState) ==> event(notifyChallengeReceived).
+query event(notifyStateBI) ==> event(sendRewardBH).
+query event(BIends) && event(BCinterruptedForBI)  ==> event(BHleaves).
+query event(BCinterruptedForBH) ==> event (BIleaves).
+
+query attacker(ksi);
+      attacker(ksh);
+      attacker(ksc).
+
+
+
+let processBI(ksi: sskey, kpc: spkey, a: channel) =
+    out(cic, sign(contract, ksi));
+    in(cic, n: bitstring);
+    let x: bitstring = checksign(n, kpc) in
+    in(cic, p: bitstring);
+    let y: bitstring = checksign(p, kpc) in
+    if is_valid(y)=true then
+       event traceValid;
+       out(a, m)
+    else 0.
+
+let processBC(ksc: sskey, kpi: spkey, kph: spkey, b: channel) =
+  
+    in(cic, c:bitstring);
+    let x: bitstring = checksign(c, kpi) in
+    out(cic, sign(notify, ksc));
+    out(chc, sign(notify, ksc));
+    in(chc, h:bitstring);
+    let y: bitstring = checksign(h, kph) in
+   (* new y:bitstring;*)
+    out(cic, sign(y,ksc));
+    out(b, m).
+
+
+let processBH(ksh: sskey, kpc: spkey, c: channel) =
+    in(chc, n: bitstring);
+    let x: bitstring = checksign(n, kpc) in
+    out(chc, sign(trace, ksh));
+    out(c, m).
+
+
+let processBI'(ksi: sskey, kpc: spkey, a:channel) =
+    in(a,l: bitstring);
+    event startChallenge;
+    new challenge: bitstring;
+    out(cic, sign(challenge, ksi));
+    in(cic, n: bitstring);
+    let y: bitstring = checksign(n, kpc) in
+    in(cic, r: bitstring);
+    let z: bitstring = checksign(r, kpc).
+
+
+let processBC'(ksc: sskey, kpi: spkey, kph: spkey, b:channel) =
+    in(b,l: bitstring);
+    in(cic, d: bitstring);
+
+event publicChallengeReward;
+    let y: bitstring = checksign(d, kpi) in
+    out(cic, sign(notify, ksc));
+    event notifyChallengeBH;
+    out(chc, sign(notify, ksc));
+    in(chc,r: bitstring);
+    let z: bitstring = checksign(r, kph) in
+    if is_valid(z)=true then
+    event challengeResolved;
+    new reward: bitstring;
+    event sendRewardBH;
+    out(chc, sign(reward,ksc));
+    event notifyStateBI;
+    out(cic, sign(z,ksc)).
+
+
+let processBH'(ksh: sskey, kpc: spkey, c: channel) =
+    in(c,l: bitstring);
+    in(chc, n: bitstring);
+    event notifyChallengeReceived;
+    let y: bitstring = checksign(n, kpc) in
+   (* new state: bitstring;*)
+    event sendNewState;
+    out(chc, sign(state,ksh));
+    in(chc, d: bitstring);
+    let z: bitstring = checksign(d,kpc) in
+    0.
+    
+
+process
+	(* Private Keys *)
+(*	new ksi: sskey;
+	new ksc: sskey;
+	new ksh: sskey;*)
+
+	(* Public Keys *)
+	let kpi = spk(ksi) in
+	let kpc = spk(ksc) in
+	let kph = spk(ksh) in
+
+	(* Public key diclousure *)
+	out(ck, kpi);
+	out(ck, kpc);
+	out(ck, kph);
+
+
+
+	(* Private channels *)
+	new a: channel;
+	new b: channel;
+	new c: channel;
+	new d1: channel;
+	new d2: channel;
+	new d3: channel;
+
+
+
+	( processBI(ksi, kpc, a) |
+	  processBC(ksc, kpi, kph, b) |
+	  processBH(ksh, kpc, c)
+	)|
+	( !( out(d1,m) |
+	     in(d1,e: bitstring); processBI'(ksi, kpc, a)|
+	     in(d1,t: bitstring); out(cic, sign(exit, ksi));event BIleaves; 0 |
+	     in(d1,v: bitstring); out(cic, sign(terminated,ksi)); 0 |
+	     in(d1,p: bitstring); in(cic, w: bitstring); let x: bitstring = checksign(w, kpc) in event BIends; 0
+	   ) |
+	   
+	  !( out(d2,m) |
+	     in(d2,e: bitstring); processBC'(ksc, kpi, kph, b) |
+	     in(d2,t: bitstring); in(cic,f: bitstring); let x: bitstring = checksign(f, kpi) in if (is_exit(x) || is_terminated(x)) then out(chc, sign(x,ksc)); event BCinterruptedForBI; 0 |
+	     in(d2,i: bitstring); in(chc,g: bitstring); let y: bitstring = checksign(g, kph) in if is_exit(y) then out(cic, sign(x, ksc)); event BCinterruptedForBH; 0
+	   ) |
+
+	 !( out(d3,m) |
+	    in(d3,e: bitstring); processBH'(ksh, kpc, c) |
+	    in(d3,t: bitstring); out(chc,sign(exit,ksh)); event BHleaves; 0 |
+	    in(d3,v: bitstring); in(chc,y: bitstring); let x: bitstring = checksign(y,kpc) in 0
+	  )
+
+        )
+
